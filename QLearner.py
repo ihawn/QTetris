@@ -19,7 +19,7 @@ TRAIN_POOL_SIZE = 100000
 class TetrisAI:
 
     def __init__(self, input_size, game):
-        self.probability_curve_divisor = 100
+        self.probability_curve_divisor = 3000
         self.training_pool = deque(maxlen=TRAIN_POOL_SIZE)
         self.model = Model(input_size, 256, 256, 5)  # left, stay, right, rotate left, rotate right
         self.q_step = QStep(self.model, learning_rate=LEARNING_RATE, discount_rate=DISCOUNT_RATE, tetris_ai=self)

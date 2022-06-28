@@ -91,7 +91,7 @@ class Game:
             self.tetris_ai.train(current_state, next_state, move_vector, reward, reward == GAME_OVER_REWARD)
 
         self.draw_frame()
-        self.clock.tick(SPEED if self.game_count < 500 else 10)
+        self.clock.tick(SPEED if self.game_count < 20000 else 10)
 
     def move_piece(self, direction):
         if self.current_piece is not None:
@@ -268,17 +268,22 @@ class Game:
         rows_with_blocks = 0
         for y in range(HEIGHT):
             incr = 1
+            ind_row_score = 0
             for x in range(WIDTH):
                 if self.game_matrix[x][y] != 0 and [x, y] not in current_piece_block_positions:
-                    row_score += 0.1*WIDTH
+                    ind_row_score += 0.1 * WIDTH
                     rows_with_blocks += incr
                     incr = 0
+            if ind_row_score < 0.6 * WIDTH:
+                ind_row_score = 0
+                rows_with_blocks = rows_with_blocks - 1 if rows_with_blocks > 0 else 0
+            row_score += ind_row_score
 
         if rows_with_blocks > 0:
             row_score /= rows_with_blocks
             return row_score
         else:
-            return  0
+            return 0
 
 
 class PieceDispenser:
