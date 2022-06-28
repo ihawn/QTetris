@@ -2,15 +2,32 @@ import pygame
 import numpy as np
 import random
 from enum import Enum
+from QLearner import QStep
+from QLearner import TetrisAI
 
 pygame.init()
 pygame.font.init()
 
+
+class Playertype(Enum):
+    HUMAN = 1,
+    AI = 2
+
+
+class Direction(Enum):
+    RIGHT = [1, 0]
+    LEFT = [-1, 0]
+    DOWN = [0, 1]
+
+
 WIDTH = 10
-HEIGHT = 30
-BLOCK_SIZE = 40
-SPEED = 6
+HEIGHT = 20
+BLOCK_SIZE = 60
+SPEED = 1000
 TOP_BUFFER = 2
+PLAYER_TYPE = Playertype.AI
+CLEAR_ROW_REWARD = 50
+GAME_OVER_REWARD = -40
 
 COLORS = {
     1: (255, 255, 0),
@@ -21,12 +38,6 @@ COLORS = {
     6: (0, 0, 255),
     7: (162, 0, 255)
 }
-
-
-class Direction(Enum):
-    RIGHT = [1, 0]
-    LEFT = [-1, 0]
-    DOWN = [0, 1]
 
 
 class Game:
@@ -43,70 +54,92 @@ class Game:
         self.reset()
         self.current_piece = None
         self.current_piece_block_positions = []
+        self.tetris_ai = TetrisAI(16 + WIDTH*HEIGHT, self)
+        self.game_count = 0
 
     def run_game_step(self):
 
-        self.get_human_input()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+
+        move_vector = [0, 0, 0, 0, 0]
+        if PLAYER_TYPE == Playertype.AI:
+            move_vector = self.get_ai_input()
+        elif PLAYER_TYPE == Playertype.HUMAN:
+            self.get_human_input()
+
+        current_state = self.tetris_ai.get_state_vector()
 
         if self.current_piece is None:
             self.current_piece = self.piece_dispenser.get_random_piece()
         else:
             self.move_piece(Direction.DOWN)
 
-        self.clear_row_if_available()
+        reward = self.clear_row_if_available()
+        reward += self.get_row_score()
 
         if self.is_game_over():
+            self.game_count += 1
             self.reset()
+            reward = GAME_OVER_REWARD
+
+        next_state = self.tetris_ai.get_state_vector()
+
+        if Playertype == Playertype.AI:
+            self.tetris_ai.train(current_state, next_state, move_vector, reward, reward == GAME_OVER_REWARD)
 
         self.draw_frame()
-        self.clock.tick(SPEED)
+        self.clock.tick(SPEED if self.game_count < 500 else 10)
 
     def move_piece(self, direction):
+        if self.current_piece is not None:
+            offset = direction.value
+            if not self.piece_collision(offset, self.current_piece):
+                self.clear_current_piece()
+                self.current_piece.x += offset[0]
+                self.current_piece.y += offset[1]
+                self.draw_current_piece()
 
-        offset = direction.value
-        if not self.piece_collision(offset, self.current_piece):
-            self.clear_current_piece()
-            self.current_piece.x += offset[0]
-            self.current_piece.y += offset[1]
-            self.draw_current_piece()
-
-        elif direction == direction.DOWN:
-            self.current_piece = None  # spawn next piece
+            elif direction == direction.DOWN:
+                self.current_piece = None  # spawn next piece
 
     def rotate_piece(self, direction):
-        self.clear_current_piece()
+        if self.current_piece is not None:
+            self.clear_current_piece()
 
-        rot = self.current_piece.orientation
-        old_rot = rot
-        rot += 1 if direction == Direction.RIGHT else -1
-        if rot >= len(self.current_piece.piece_positions):
-            rot = 0
-        elif rot < 0:
-            rot = len(self.current_piece.piece_positions) - 1
+            rot = self.current_piece.orientation
+            old_rot = rot
+            rot += 1 if direction == Direction.RIGHT else -1
+            if rot >= len(self.current_piece.piece_positions):
+                rot = 0
+            elif rot < 0:
+                rot = len(self.current_piece.piece_positions) - 1
 
-        self.current_piece.orientation = rot
-        self.current_piece.piece_array = self.current_piece.piece_positions[rot]
+            self.current_piece.orientation = rot
+            self.current_piece.piece_array = self.current_piece.piece_positions[rot]
 
-        can_rotate = True
-        if self.piece_collision([0, 0], self.current_piece):  # if there's a collision, determine how to shift piece
-            rng = [x for x in range(-1, 2) if x != 0]         # in order to rotate it
-            can_rotate = False
-            for n in rng:
-                for m in rng:
-                    if not self.piece_collision([n, m], self.current_piece):  # found an orientation that works
-                        self.current_piece.x += n
-                        self.current_piece.y += m
-                        can_rotate = True
-                        break
-                else:
-                    continue
-                break
+            can_rotate = True
+            if self.piece_collision([0, 0], self.current_piece):  # if there's a collision, determine how to shift piece
+                rng = [x for x in range(-1, 2) if x != 0]         # in order to rotate it
+                can_rotate = False
+                for n in rng:
+                    for m in rng:
+                        if not self.piece_collision([n, m], self.current_piece):  # found an orientation that works
+                            self.current_piece.x += n
+                            self.current_piece.y += m
+                            can_rotate = True
+                            break
+                    else:
+                        continue
+                    break
 
-        if not can_rotate:
-            self.current_piece.orientation = old_rot
-            self.current_piece.piece_array = self.current_piece.piece_positions[old_rot]
+            if not can_rotate:
+                self.current_piece.orientation = old_rot
+                self.current_piece.piece_array = self.current_piece.piece_positions[old_rot]
 
-        self.draw_current_piece()
+            self.draw_current_piece()
 
     def clear_current_piece(self):
         for i in range(len(self.current_piece.piece_array)):
@@ -138,19 +171,22 @@ class Game:
 
     def clear_row_if_available(self):
         current_piece_block_positions = self.get_block_positions_of_current_piece()
-        for y in reversed(range(HEIGHT)):
+        reward = 0
+        for y in range(HEIGHT):
             block_count = 0
             for x in range(WIDTH):
                 if self.game_matrix[x][y] == 0 or [x, y] in current_piece_block_positions:  # can't clear if current
                     continue                                                                # piece isn't set
                 block_count += 1
             if block_count == WIDTH:  # row was cleared
-                self.score += 10
+                reward += CLEAR_ROW_REWARD
                 for x in range(WIDTH):  # zero out row
                     self.game_matrix[x][y] = 0
                 for y2 in reversed(range(y)):  # move everything above down one
                     for x2 in range(WIDTH):
                         self.game_matrix[x2][y2 + 1] = self.game_matrix[x2][y2]
+        self.score = reward
+        return reward
 
     def draw_frame(self):
         pygame.event.get()
@@ -201,12 +237,48 @@ class Game:
                 if event.key == pygame.K_e:
                     self.rotate_piece(Direction.RIGHT)
 
+    def get_ai_input(self):
+        move_id = self.tetris_ai.q_step.get_ai_input()
+
+        if move_id == 0:
+            self.move_piece(Direction.LEFT)
+        elif move_id == 1:
+            self.move_piece(Direction.RIGHT)
+        elif move_id == 2:
+            pass
+        elif move_id == 3:
+            self.rotate_piece(Direction.LEFT)
+        elif move_id == 4:
+            self.rotate_piece(Direction.RIGHT)
+
+        move_vector = [0, 0, 0, 0, 0]
+        move_vector[move_id] = 1
+        return move_vector
+
     def reset(self):
         self.frames = 0
         self.score = 0
         for i in range(WIDTH):
             for j in range(HEIGHT):
                 self.game_matrix[i][j] = 0
+
+    def get_row_score(self):
+        current_piece_block_positions = self.get_block_positions_of_current_piece()
+        row_score = 0
+        rows_with_blocks = 0
+        for y in range(HEIGHT):
+            incr = 1
+            for x in range(WIDTH):
+                if self.game_matrix[x][y] != 0 and [x, y] not in current_piece_block_positions:
+                    row_score += 0.1*WIDTH
+                    rows_with_blocks += incr
+                    incr = 0
+
+        if rows_with_blocks > 0:
+            row_score /= rows_with_blocks
+            return row_score
+        else:
+            return  0
 
 
 class PieceDispenser:
