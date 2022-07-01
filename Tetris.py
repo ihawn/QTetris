@@ -2,9 +2,7 @@ import pygame
 import numpy as np
 import random
 from enum import Enum
-from QLearner import QStep
 from QLearner import TetrisAI
-
 pygame.init()
 pygame.font.init()
 
@@ -23,7 +21,7 @@ class Direction(Enum):
 WIDTH = 10
 HEIGHT = 20
 BLOCK_SIZE = 60
-SPEED = 1000
+SPEED = 2000
 TOP_BUFFER = 2
 PLAYER_TYPE = Playertype.AI
 CLEAR_ROW_REWARD = 50
@@ -77,8 +75,11 @@ class Game:
         else:
             self.move_piece(Direction.DOWN)
 
-        reward = self.clear_row_if_available()
-        reward += self.get_row_score()
+        current_piece_block_positions = self.get_block_positions_of_current_piece()
+        reward = self.clear_row_if_available(current_piece_block_positions)
+        reward += self.get_height_score(current_piece_block_positions)
+        reward += 0.1
+        reward += self.get_hole_score(current_piece_block_positions)
 
         if self.is_game_over():
             self.game_count += 1
@@ -87,7 +88,7 @@ class Game:
 
         next_state = self.tetris_ai.get_state_vector()
 
-        if Playertype == Playertype.AI:
+        if PLAYER_TYPE == Playertype.AI:
             self.tetris_ai.train(current_state, next_state, move_vector, reward, reward == GAME_OVER_REWARD)
 
         self.draw_frame()
@@ -169,8 +170,7 @@ class Game:
                         return True
         return False
 
-    def clear_row_if_available(self):
-        current_piece_block_positions = self.get_block_positions_of_current_piece()
+    def clear_row_if_available(self, current_piece_block_positions):
         reward = 0
         for y in range(HEIGHT):
             block_count = 0
@@ -197,9 +197,11 @@ class Game:
                     self.draw_block(i, j, self.game_matrix[i, j])
         pygame.draw.line(self.display, (255, 255, 255), (0, TOP_BUFFER*BLOCK_SIZE), (WIDTH * BLOCK_SIZE, TOP_BUFFER*BLOCK_SIZE), 2)
 
-        font = pygame.font.SysFont('Courier New', 40)
+        font = pygame.font.SysFont('Courier New', 28)
         score_surface = font.render('Score: ' + str(self.score), False, (255, 255, 255))
+        game_count_surface = font.render('Game Count: ' + str(self.game_count), False, (255, 255, 255))
         self.display.blit(score_surface, (5, 5))
+        self.display.blit(game_count_surface, (5, 40))
 
         pygame.display.flip()
 
@@ -262,8 +264,7 @@ class Game:
             for j in range(HEIGHT):
                 self.game_matrix[i][j] = 0
 
-    def get_row_score(self):
-        current_piece_block_positions = self.get_block_positions_of_current_piece()
+    def get_row_score(self, current_piece_block_positions):
         row_score = 0
         rows_with_blocks = 0
         for y in range(HEIGHT):
@@ -284,6 +285,35 @@ class Game:
             return row_score
         else:
             return 0
+
+    def get_hole_score(self, current_piece_block_positions):
+        hole_count = 0
+        for y in range(HEIGHT - 1):
+            for x in range(WIDTH):
+                if self.game_matrix[x][y] != 0 and self.game_matrix[x][y + 1] == 0 and [x, y] not in current_piece_block_positions:
+                    hole_count += 1
+        return -0.2 * hole_count
+
+    def get_height_score(self, current_piece_block_positions):
+        max_height = 0
+        total_height = 0
+        bumpiness = 0
+        last_height = 0
+        for x in range(WIDTH):
+            current_height = 0
+            for y in reversed(range(HEIGHT)):
+                if self.game_matrix[x][y] != 0 and [x, y] not in current_piece_block_positions:
+                    current_height = HEIGHT - y
+            if current_height > max_height:
+                max_height = current_height
+            total_height += current_height
+            if x > 0:
+                bumpiness += abs(last_height - current_height)
+            last_height = current_height
+
+        return -(max_height*0.3 + 0.1*total_height + 0.3 * bumpiness)
+
+
 
 
 class PieceDispenser:

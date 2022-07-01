@@ -71,12 +71,19 @@ class Model(nn.Module):
         self.linear2 = nn.Linear(hidden_size_1, hidden_size_2)
         self.linear3 = nn.Linear(hidden_size_2, output_size)
 
+        self.conv1 = nn.Sequential(nn.Linear(input_size, hidden_size_1), nn.ReLU(inplace=True))
+        self.conv2 = nn.Sequential(nn.Linear(hidden_size_1, hidden_size_2), nn.ReLU(inplace=True))
+        self.conv3 = nn.Sequential(nn.Linear(hidden_size_2, output_size))
+
     def forward(self, input):
-        input = self.linear1(input)
-        input = F.relu(input)
-        input = self.linear2(input)
-        input = F.relu(input)
-        input = self.linear3(input)
+        # input = self.linear1(input)
+        # input = F.relu(input)
+        # input = self.linear2(input)
+        # input = F.relu(input)
+        # input = self.linear3(input)
+        input = self.conv1(input)
+        input = self.conv2(input)
+        input = self.conv3(input)
         return input
 
 
@@ -106,6 +113,8 @@ class QStep:
         return move_id
 
     def train_step(self, current_states, next_states, actions, rewards, game_over):
+        current_states = np.array(current_states)
+        next_states = np.array(next_states)
         current_states = torch.tensor(current_states, dtype=torch.float)
         next_states = torch.tensor(next_states, dtype=torch.float)
         actions = torch.tensor(actions, dtype=torch.float)
